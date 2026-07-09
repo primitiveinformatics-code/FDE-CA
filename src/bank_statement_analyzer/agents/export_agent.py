@@ -6,12 +6,16 @@ CSV via `xlsxwriter`/`csv_export`.
 """
 from __future__ import annotations
 
+import logging
+
 from bank_statement_analyzer.calculators.calculator import expense_by_category, group_income_by_counterparty
 from bank_statement_analyzer.export.csv_export import export_csv
 from bank_statement_analyzer.export.reference_hydrator import hydrate_transactions
 from bank_statement_analyzer.export.xlsx_export import export_workbook
 from bank_statement_analyzer.pii.masker import PIIVault
 from bank_statement_analyzer.run_context import RunResult
+
+logger = logging.getLogger(__name__)
 
 
 def apply_review_edits(run: RunResult, edits: list[dict]) -> None:
@@ -51,7 +55,14 @@ def export(
     review_edits: list[dict] | None = None,
 ) -> None:
     if review_edits:
+        logger.info("Applying %d review edit(s) before export", len(review_edits))
         apply_review_edits(run, review_edits)
     hydrate_transactions(vault, run.transactions)
+    logger.info(
+        "Writing workbook: %s (%d transaction(s), %d income group(s), %d expense categor(y/ies), %d needs-attention item(s))",
+        xlsx_path, len(run.transactions), len(run.income_groups), len(run.expense_categories), len(run.needs_attention),
+    )
     export_workbook(run, xlsx_path)
+    logger.info("Writing CSV: %s", csv_path)
     export_csv(run, csv_path)
+    logger.info("Export complete: %s, %s", xlsx_path, csv_path)

@@ -1,0 +1,58 @@
+What the app actually needs to handle
+
+  The build spec (FR‑1 → FR‑12) plus the matcher/classifier code define a fairly specific set of scenarios. Grouped by pipeline stage:
+
+  Ingestion & parsing (FR‑1, FR‑2)
+  - Multiple banks in one run (the code recognizes HDFC, ICICI, SBI, Axis, Kotak, PNB, BoB, Canara, Union Bank, IDFC First, Yes Bank, IndusInd, Bank of
+  India, Indian Bank, Central Bank — pdf_parser.py:KNOWN_BANK_NAMES), each with a different column layout/narration style.
+  - Two table layouts: separate Debit/Credit columns vs. single Amount + Dr/Cr indicator column.
+  - Header synonyms (Narration vs Particulars vs Transaction Details; Withdrawal Amt vs Debit; Value Date vs Txn Date, etc.) — and a genuinely unrecognized
+  layout that falls through to the field_locator LLM.
+  - Multiple date formats (DD-MM-YYYY, DD/MM/YY, DD-Mon-YYYY, DD Month YYYY, ISO, US MM/DD/YYYY).
+  - Amount formatting edge cases: ₹/Rs./INR prefixes, comma thousands separators, parenthesized negatives, trailing "Dr"/"Cr" suffix.
+  - Password-protected PDFs.
+  - Scanned/image-only PDFs (no extractable text → OCR fallback) vs. borderless digitally-generated PDFs (text present but no ruling lines → text-position
+  table strategy) vs. a genuinely unparseable file (no text, no OCR-able content → hard flag).
+  - Multi-page statements where the header row repeats on every page.
+  - Missing/unlocatable basic fields: account holder name, account number, IFSC, bank name, statement period — each should be individually omittable from a
+  test file to prove the "Needs attention" flag fires.
+
+  Self-transfer reconciliation (FR‑3)
+  - Clean UPI RRN match, both legs across two different uploaded accounts.
+  - No RRN (cheque/NEFT) → amount + date-window (±3 days) + narration-similarity fallback, optionally boosted by a shared UPI VPA in both narrations.
+  - Multiple equally-plausible candidates on either side (RRN collision or narration-similarity tie) → should land in "ambiguous" → adjudicator.
+  - A transfer-shaped narration with no real counterpart anywhere → explicit unmatched.
+  - Same-account debit/credit (should NOT be treated as self-transfer — it's a different feature, round-tripping).
+
+  Refund/reversal reconciliation (FR‑3a)
+  - Refund keyword credit (refund, reversal, chargeback, txn fail, order cancel, etc.) matched to its original debit via RRN (high confidence).
+  - Amount + wider date window (45 days) + narration fallback, same-account original debit (medium confidence) vs. cross-account (low confidence).
+  - Genuinely orphan refund — a refund credit with no plausible original debit anywhere in the upload set.
+  - Ambiguous refund (multiple candidate original debits of the same amount within the window) → adjudicator.
+
+  Income classification (FR‑4, FR‑7)
+  - Each of the 6 ITR heads (Salary, Interest, Business/Professional receipts, Rent, Capital gains, Other) needing a suggestion.
+  - Auto-tagged interest credits (keyword-based, high confidence, auto-flagged 26AS-likely).
+  - Unrecognized counterparty with no keyword match → routed to the classifier LLM.
+  - Loan disbursal credits and gift credits — excluded from income like transfers, but still surfaced on Needs Attention.
+  - Recurring vs. one-off counterparty (grouping is by extracted counterparty name).
+
+  Credit card activity (FR‑5) — CC bill payment narrations, and separately CC fees/charges (annual fee, late fee, finance charge, over-limit fee, GST on CC)
+  as a distinct expense category.
+
+  Balance integrity (FR‑6) — at least one account where opening + credits − debits = closing exactly, and (for negative testing) one account deliberately
+  off by more than the 1‑paisa tolerance to confirm the continuity check flags it.
+
+  Recurring payments (FR‑8) — EMI/SIP/Rent/Subscription debits, same counterparty + same amount, ≥3 occurrences, roughly regular period (±4 day tolerance) —
+  plus a near-miss (only 2 occurrences, or irregular spacing) that should not qualify.
+
+  Anomalies (FR‑9)
+  - A credit that's either ≥5× the median credit or ≥₹2,00,000 (whichever is higher).
+  - A cash deposit ≥₹50,000 with "cash"/"cdm" in the narration.
+  - Same-day (±1 day) equal-amount debit+credit on the same account that reconciliation did not already claim as a transfer/refund (true round-tripping, not
+  a matched pair).
+
+  Cross-cutting
+  - PII presence (real-looking name/account/PAN/mobile/email in header text) to verify masking never leaks to the LLM payload — useful negative test even
+  though it's simulated data.
+  - At least one file that fails entirely (unparseable) alongside good files, to confirm one bad file doesn't abort the whole run.

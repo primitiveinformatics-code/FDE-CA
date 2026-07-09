@@ -29,6 +29,7 @@ Pure deterministic Python — no LLM involvement. Ambiguous leftovers
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from bank_statement_analyzer.config import MatchingConfig, REFUND_KEYWORDS, DEFAULT_CONFIG
@@ -42,6 +43,8 @@ from bank_statement_analyzer.reconciliation.common import (
     extract_rrn,
     narration_similarity,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -67,6 +70,10 @@ def match_refunds(
 
     refund_credits = [t for t in transactions if is_refund_like(t)]
     all_debits = [t for t in transactions if t.is_debit]
+    logger.debug(
+        "match_refunds: %d refund-like credit(s), %d debit(s) as candidate originals, out of %d total transaction(s)",
+        len(refund_credits), len(all_debits), len(transactions),
+    )
 
     matched_refs: set[str] = set()
 
@@ -148,4 +155,8 @@ def match_refunds(
                 kind="refund",
             ))
 
+    logger.info(
+        "match_refunds: %d confirmed, %d unmatched, %d ambiguous-group(s)",
+        len(result.confirmed), len(result.unmatched), len(result.ambiguous),
+    )
     return result

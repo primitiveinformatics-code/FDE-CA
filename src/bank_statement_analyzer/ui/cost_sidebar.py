@@ -1,7 +1,12 @@
-"""FR-12: live token/cost sidebar + threshold warning banner."""
+"""FR-12: live token/cost display + threshold warning banner.
+
+Lives as a page inside `ui.side_panel.SidePanel` (see `MainWindow`), so
+unlike the other panel pages it owns no collapsible chrome of its own —
+the side panel already provides show/hide.
+"""
 from __future__ import annotations
 
-from PySide6.QtWidgets import QGroupBox, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 
 class CostSidebar(QWidget):
@@ -10,14 +15,12 @@ class CostSidebar(QWidget):
         self.warn_threshold_usd = warn_threshold_usd
 
         layout = QVBoxLayout(self)
-        box = QGroupBox("Token usage & cost")
-        box_layout = QVBoxLayout(box)
 
         self.tokens_label = QLabel("Tokens: 0 in / 0 out")
         self.cost_label = QLabel("Estimated cost: $0.00")
         self.calls_label = QLabel("API calls: 0")
         for w in (self.tokens_label, self.cost_label, self.calls_label):
-            box_layout.addWidget(w)
+            layout.addWidget(w)
 
         self.warning_banner = QLabel("")
         self.warning_banner.setWordWrap(True)
@@ -26,7 +29,6 @@ class CostSidebar(QWidget):
         )
         self.warning_banner.setVisible(False)
 
-        layout.addWidget(box)
         layout.addWidget(self.warning_banner)
         layout.addStretch(1)
 

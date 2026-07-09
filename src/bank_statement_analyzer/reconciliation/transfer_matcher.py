@@ -18,6 +18,7 @@ here since this never touches the network) transaction data.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from bank_statement_analyzer.config import MatchingConfig, TRANSFER_MODE_KEYWORDS, DEFAULT_CONFIG
@@ -31,6 +32,8 @@ from bank_statement_analyzer.reconciliation.common import (
     extract_rrn,
     narration_similarity,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -57,6 +60,10 @@ def match_self_transfers(
     candidates = [t for t in transactions if _is_transfer_like(t)]
     debits = [t for t in candidates if t.is_debit]
     credits = [t for t in candidates if t.is_credit]
+    logger.debug(
+        "match_self_transfers: %d transfer-like candidate(s) out of %d total transaction(s) (%d debit, %d credit)",
+        len(candidates), len(transactions), len(debits), len(credits),
+    )
 
     matched_refs: set[str] = set()
 
@@ -152,4 +159,8 @@ def match_self_transfers(
             kind="self_transfer",
         ))
 
+    logger.info(
+        "match_self_transfers: %d confirmed, %d unmatched, %d ambiguous-group(s)",
+        len(result.confirmed), len(result.unmatched), len(result.ambiguous),
+    )
     return result

@@ -23,7 +23,7 @@ def test_run_without_api_key_produces_run_result(make_txn):
         make_txn(2, "HDFC", "hdfc.pdf", "ACC-1", "2025-04-05", "ATM CASH WDL", debit=2000),
     ]
 
-    def fake_process_file(pdf_path, bank, account_ref, password, llm_client, vault):
+    def fake_process_file(pdf_path, bank, account_ref, password, llm_client, vault, **kwargs):
         return _good_result("HDFC", "hdfc.pdf", account_ref, txns_acc1)
 
     orch = Orchestrator()
@@ -40,7 +40,7 @@ def test_run_without_api_key_produces_run_result(make_txn):
 def test_flagged_file_excluded_and_reported(make_txn):
     good_txns = [make_txn(1, "HDFC", "hdfc.pdf", "ACC-1", "2025-04-01", "SB INT.PD", credit=100)]
 
-    def fake_process_file(pdf_path, bank, account_ref, password, llm_client, vault):
+    def fake_process_file(pdf_path, bank, account_ref, password, llm_client, vault, **kwargs):
         if "bad" in pdf_path:
             return _flagged_result("Unknown", "bad.pdf", account_ref, "Could not map statement columns")
         return _good_result("HDFC", "hdfc.pdf", account_ref, good_txns)
@@ -66,7 +66,7 @@ def test_self_transfer_and_refund_flow_through_orchestrator(make_txn):
         make_txn(3, "HDFC", "hdfc.pdf", "ACC-1", "2025-04-14", "Amazon refund reversed", credit=1200),
     ]
 
-    def fake_process_file(pdf_path, bank, account_ref, password, llm_client, vault):
+    def fake_process_file(pdf_path, bank, account_ref, password, llm_client, vault, **kwargs):
         if "sbi" in pdf_path:
             return _good_result("SBI", "sbi.pdf", account_ref, [txns[1]])
         return _good_result("HDFC", "hdfc.pdf", account_ref, [txns[0], txns[2], txns[3]])
@@ -88,7 +88,7 @@ def test_self_transfer_and_refund_flow_through_orchestrator(make_txn):
 def test_export_writes_files(make_txn, tmp_path):
     txns = [make_txn(1, "HDFC", "hdfc.pdf", "ACC-1", "2025-04-01", "SB INT.PD", credit=100)]
 
-    def fake_process_file(pdf_path, bank, account_ref, password, llm_client, vault):
+    def fake_process_file(pdf_path, bank, account_ref, password, llm_client, vault, **kwargs):
         return _good_result("HDFC", "hdfc.pdf", account_ref, txns)
 
     orch = Orchestrator()

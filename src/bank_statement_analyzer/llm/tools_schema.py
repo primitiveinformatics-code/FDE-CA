@@ -1,9 +1,11 @@
-"""Tool-use schemas for the three points where Sonnet is invoked:
-`field_locator` (unrecognized column layouts), `adjudicator` (ambiguous
-self-transfer/refund leftovers), and `classifier` (ITR head suggestion
-for an unrecognized counterparty). Each is a forced tool-call — the
-model must respond via the tool's `input_schema`, never free text — so
-the caller always gets a structured, parseable answer.
+"""Tool-use schemas for the points where Sonnet is invoked: `field_locator`
+(unrecognized column layouts), `adjudicator` (ambiguous self-transfer/refund
+leftovers), `classifier` (ITR head suggestion for an unrecognized
+counterparty), and `account_info_locator` (basic-field extraction when
+regex can't confidently locate them — see its own docstring below for the
+privacy tradeoff this one carries). Each is a forced tool-call — the model
+must respond via the tool's `input_schema`, never free text — so the
+caller always gets a structured, parseable answer.
 """
 from __future__ import annotations
 
@@ -47,6 +49,28 @@ ADJUDICATOR_TOOL = {
             "rationale": {"type": "string"},
         },
         "required": ["anchor_ref", "chosen_ref", "confidence", "rationale"],
+    },
+}
+
+ACCOUNT_INFO_TOOL = {
+    "name": "report_account_info",
+    "description": (
+        "Report the account holder name, account number, IFSC code, bank "
+        "name, and statement period found in this bank statement's header "
+        "text. Use null for any field not confidently present — do not guess."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "bank": {"type": ["string", "null"]},
+            "account_holder_name": {"type": ["string", "null"]},
+            "account_number": {"type": ["string", "null"]},
+            "ifsc": {"type": ["string", "null"]},
+            "period_start": {"type": ["string", "null"], "description": "ISO date YYYY-MM-DD"},
+            "period_end": {"type": ["string", "null"], "description": "ISO date YYYY-MM-DD"},
+            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        },
+        "required": ["confidence"],
     },
 }
 

@@ -67,13 +67,23 @@ class CostConfig:
     warn_threshold_usd: float = 2.0
 
 
+LLM_PROVIDERS = ["anthropic", "openrouter"]
+DEFAULT_LLM_PROVIDER = "anthropic"
+
+
 @dataclass
 class AppConfig:
     matching: MatchingConfig = field(default_factory=MatchingConfig)
     cost: CostConfig = field(default_factory=CostConfig)
     model_name: str = "claude-sonnet-5"
+    openrouter_model_name: str = "anthropic/claude-sonnet-5"
     keyring_service: str = "bank-statement-analyzer"
-    keyring_username: str = "anthropic-api-key"
+    # One keyring entry per provider so switching providers never clobbers
+    # the other provider's stored key.
+    keyring_usernames: dict = field(default_factory=lambda: {
+        "anthropic": "anthropic-api-key",
+        "openrouter": "openrouter-api-key",
+    })
 
 
 DEFAULT_CONFIG = AppConfig()

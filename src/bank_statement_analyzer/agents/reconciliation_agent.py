@@ -6,7 +6,7 @@ refs/dates/amounts and masked narration.
 from __future__ import annotations
 
 from bank_statement_analyzer.config import MatchingConfig
-from bank_statement_analyzer.llm.client import ClaudeToolClient
+from bank_statement_analyzer.llm.client import LLMClient
 from bank_statement_analyzer.parsing.models import Transaction
 from bank_statement_analyzer.pii.masker import PIIVault, mask_narration
 from bank_statement_analyzer.reconciliation.common import AmbiguousGroup, MatchedPair, UnmatchedCandidate
@@ -18,7 +18,7 @@ from bank_statement_analyzer.run_context import ReconciliationResult
 def _resolve_ambiguous(
     groups: list[AmbiguousGroup],
     transactions_by_ref: dict[str, Transaction],
-    llm_client: ClaudeToolClient | None,
+    llm_client: LLMClient | None,
     vault: PIIVault,
     anchor_is_leg_a: bool,
 ) -> tuple[list[MatchedPair], list[UnmatchedCandidate]]:
@@ -76,7 +76,7 @@ def _resolve_ambiguous(
 
 def reconcile(
     transactions: list[Transaction],
-    llm_client: ClaudeToolClient | None,
+    llm_client: LLMClient | None,
     vault: PIIVault,
     cfg: MatchingConfig | None = None,
 ) -> tuple[ReconciliationResult, ReconciliationResult]:

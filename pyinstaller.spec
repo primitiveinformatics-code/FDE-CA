@@ -8,6 +8,7 @@ block_cipher = None
 
 hidden_imports = (
     collect_submodules("anthropic")
+    + collect_submodules("httpx")
     + collect_submodules("pdfplumber")
     + ["keyring.backends"]
 )

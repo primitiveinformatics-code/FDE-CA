@@ -86,6 +86,14 @@ def test_extract_statement_period():
     assert end == date(2025, 4, 30)
 
 
+def test_extract_statement_period_with_colon_separators():
+    start, end = extract_statement_period(
+        "Statement of Axis Account No: 123456789 for the period (From: 01-04-2025 To: 31-03-2026)"
+    )
+    assert start == date(2025, 4, 1)
+    assert end == date(2026, 3, 31)
+
+
 def test_mask_account_number_display():
     assert mask_account_number_display("123456789012") == "XXXXXXXX9012"
     assert mask_account_number_display(None) is None

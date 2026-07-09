@@ -10,6 +10,7 @@ always mask first (`pii.masker`). Tracks cumulative cost via the shared
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Callable
 
@@ -20,14 +21,17 @@ from bank_statement_analyzer.calculators.calculator import (
     group_income_by_counterparty,
     run_totals,
 )
-from bank_statement_analyzer.config import AppConfig, DEFAULT_CONFIG
+from bank_statement_analyzer.config import AppConfig, DEFAULT_CONFIG, DEFAULT_LLM_PROVIDER
 from bank_statement_analyzer.cost_meter import CostMeter
-from bank_statement_analyzer.llm.client import ClaudeToolClient
+from bank_statement_analyzer.llm.client import LLMClient, create_llm_client
 from bank_statement_analyzer.parsing.models import StatementMeta, Transaction
 from bank_statement_analyzer.pii.masker import PIIVault
 from bank_statement_analyzer.run_context import NeedsAttentionItem, RunResult
 
-ProgressCallback = Callable[[str], None]
+logger = logging.getLogger(__name__)
+
+# (message, percent-complete 0-100)
+ProgressCallback = Callable[[str, int], None]
 
 
 @dataclass
@@ -49,10 +53,9 @@ class Orchestrator:
         self.cost_meter = cost_meter or CostMeter(cfg=self.config.cost)
         self.vault = PIIVault()
 
-    def _make_llm_client(self, api_key: str | None) -> ClaudeToolClient | None:
-        if not api_key:
-            return None
-        return ClaudeToolClient(api_key=api_key, cost_meter=self.cost_meter, model=self.config.model_name)
+    def _make_llm_client(self, provider: str, api_key: str | None, model: str | None = None) -> LLMClient | None:
+        default_model = self.config.model_name if provider == "anthropic" else self.config.openrouter_model_name
+        return create_llm_client(provider, api_key, self.cost_meter, model or default_model)
 
     def run(
         self,
@@ -60,13 +63,29 @@ class Orchestrator:
         client_label: str,
         api_key: str | None,
         progress_callback: ProgressCallback | None = None,
+        keep_metadata_local: bool = False,
+        provider: str = DEFAULT_LLM_PROVIDER,
+        model: str | None = None,
     ) -> RunResult:
-        llm_client = self._make_llm_client(api_key)
-        notify = progress_callback or (lambda _msg: None)
+        llm_client = self._make_llm_client(provider, api_key, model)
+
+        # Fixed stages after the per-file loop: reconcile, classify, final calc.
+        total_steps = len(files) + 3
+        step = 0
+
+        def notify(msg: str) -> None:
+            nonlocal step
+            step += 1
+            pct = min(100, round(step / total_steps * 100)) if total_steps else 100
+            logger.info(msg)
+            if progress_callback is not None:
+                progress_callback(msg, pct)
 
         statement_metas: dict[str, StatementMeta] = {}
         all_transactions: list[Transaction] = []
         needs_attention: list[NeedsAttentionItem] = []
+
+        logger.info("Run starting: %d file(s), llm_enabled=%s", len(files), llm_client is not None)
 
         # --- Step 2: per-statement extraction (one bad file flags, doesn't abort) ---
         for i, file in enumerate(files):
@@ -75,8 +94,10 @@ class Orchestrator:
             try:
                 result = extraction_agent.process_file(
                     file.path, file.bank, account_ref, file.password, llm_client, self.vault,
+                    keep_metadata_local=keep_metadata_local,
                 )
             except Exception as e:  # noqa: BLE001 - P1 resilience: bad file must not abort the run
+                logger.exception("Unhandled parse error for %s", file.path)
                 meta = StatementMeta(bank=file.bank or "", pdf=file.path.rsplit("/", 1)[-1], account_ref=account_ref)
                 meta.flagged = True
                 meta.flag_reason = f"Unhandled parse error: {e}"
@@ -88,6 +109,11 @@ class Orchestrator:
                 continue
 
             statement_metas[account_ref] = result.meta
+            logger.info(
+                "%s (%s): extraction success=%s, %d transaction(s), flagged=%s%s",
+                file.path, account_ref, result.success, len(result.transactions), result.meta.flagged,
+                f" ({result.meta.flag_reason})" if result.meta.flagged else "",
+            )
             if result.meta.flagged:
                 needs_attention.append(NeedsAttentionItem(
                     issue=result.meta.flag_reason or "Flagged during extraction",
@@ -99,10 +125,22 @@ class Orchestrator:
             all_transactions.extend(result.transactions)
 
         transactions_by_ref = {t.ref: t for t in all_transactions}
+        logger.info("Extraction complete: %d transaction(s) across %d file(s) proceed to reconciliation", len(all_transactions), len(files))
+        if not all_transactions:
+            logger.warning(
+                "No transactions were extracted from any file — reconciliation/classification/totals "
+                "will all be empty. Check the per-file 'FLAGGED' messages above (or in "
+                "bank_statement_analyzer.parsing.pdf_parser logs) for why extraction failed."
+            )
 
         # --- Step 3: reconciliation ---
         notify("Reconciling self-transfers and refunds...")
         self_transfers, refunds = reconciliation_agent.reconcile(all_transactions, llm_client, self.vault)
+        logger.info(
+            "Self-transfers: %d confirmed, %d unmatched. Refunds: %d confirmed, %d unmatched.",
+            len(self_transfers.confirmed), len(self_transfers.unmatched),
+            len(refunds.confirmed), len(refunds.unmatched),
+        )
         excluded_refs = {
             ref for pair in (*self_transfers.confirmed, *refunds.confirmed)
             for ref in (pair.leg_a_ref, pair.leg_b_ref)
@@ -125,6 +163,10 @@ class Orchestrator:
         notify("Classifying income, expenses, and anomalies...")
         recurring, anomalies = classification_agent.classify(
             all_transactions, excluded_refs, llm_client, self.vault,
+        )
+        logger.info(
+            "Classification complete: %d recurring group(s), %d anomaly flag(s)",
+            len(recurring), len(anomalies),
         )
 
         for t in all_transactions:
@@ -154,6 +196,10 @@ class Orchestrator:
         # --- Step 6 prep: deterministic math (FR-6) ---
         notify("Running final calculations...")
         continuity = all_account_continuity(all_transactions, statement_metas)
+        logger.info(
+            "Balance continuity: %d account(s) checked (%d skipped — missing opening/closing balance), %d mismatch(es)",
+            len(continuity), len(statement_metas) - len(continuity), sum(1 for c in continuity if not c.ok),
+        )
         for c in continuity:
             if not c.ok:
                 needs_attention.append(NeedsAttentionItem(
@@ -170,6 +216,11 @@ class Orchestrator:
         expense_categories = expense_by_category(debits)
         cc_payment_refs = [t.ref for t in debits if "cc_payment_or_fee" in t.tags]
         totals = run_totals(non_excluded)
+
+        logger.info(
+            "Run complete: %d transaction(s), %d needs-attention flag(s), cost $%.4f",
+            len(all_transactions), len(needs_attention), self.cost_meter.summary().get("estimated_cost_usd", 0.0),
+        )
 
         return RunResult(
             client_label=client_label,
@@ -190,4 +241,9 @@ class Orchestrator:
 
     def export(self, run: RunResult, xlsx_path: str, csv_path: str, review_edits: list[dict] | None = None) -> None:
         run.cost_summary = self.cost_meter.summary()
+        logger.info(
+            "Export starting: %d transaction(s) -> xlsx=%s, csv=%s (review_edits=%d)",
+            len(run.transactions), xlsx_path, csv_path, len(review_edits) if review_edits else 0,
+        )
         export_agent.export(run, self.vault, xlsx_path, csv_path, review_edits=review_edits)
+        logger.info("Export finished: xlsx=%s, csv=%s", xlsx_path, csv_path)

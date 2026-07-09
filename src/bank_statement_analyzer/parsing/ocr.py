@@ -43,13 +43,16 @@ def ocr_page(page) -> str:
 def ocr_document(pdf) -> str:
     """OCR every page of an already-open pdfplumber PDF, concatenated."""
     chunks = []
-    for page in pdf.pages:
+    for page_num, page in enumerate(pdf.pages, start=1):
         text = page.extract_text() or ""
         if page_needs_ocr(text):
             try:
                 text = ocr_page(page)
-            except OcrUnavailableError:
-                logger.warning("OCR unavailable; page left blank")
+                logger.info("OCR page %d: recovered %d char(s)", page_num, len(text.strip()))
+            except OcrUnavailableError as e:
+                logger.warning("OCR unavailable on page %d; page left blank: %s", page_num, e)
                 text = ""
+        else:
+            logger.debug("OCR page %d: skipped, page already had usable text", page_num)
         chunks.append(text)
     return "\n".join(chunks)

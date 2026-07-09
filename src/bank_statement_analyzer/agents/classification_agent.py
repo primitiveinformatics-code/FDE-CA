@@ -12,7 +12,7 @@ from bank_statement_analyzer.classification.classifier import (
     tag_transactions,
 )
 from bank_statement_analyzer.config import MatchingConfig
-from bank_statement_analyzer.llm.client import ClaudeToolClient
+from bank_statement_analyzer.llm.client import LLMClient
 from bank_statement_analyzer.parsing.models import Transaction
 from bank_statement_analyzer.pii.masker import PIIVault, mask_narration
 
@@ -22,7 +22,7 @@ _EXCLUDED_FROM_INCOME_TAGS = {"loan_disbursal_candidate", "gift_candidate"}
 def classify(
     transactions: list[Transaction],
     excluded_refs: set[str],
-    llm_client: ClaudeToolClient | None,
+    llm_client: LLMClient | None,
     vault: PIIVault,
     cfg: MatchingConfig | None = None,
 ) -> tuple[list[RecurringGroup], list[AnomalyFlag]]:
